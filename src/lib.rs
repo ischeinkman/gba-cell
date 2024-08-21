@@ -1,143 +1,144 @@
-#![no_std]
-#![cfg_attr(not(feature = "on_gba"), allow(unused))]
-#![warn(missing_docs)]
-#![warn(unsafe_op_in_unsafe_fn)]
-#![cfg_attr(feature = "doc_cfg", feature(doc_cfg))]
+//! Provides the [`GbaCell`] type.
 
-//! A crate for 'raw' style Game Boy Advance (GBA) development, where any code
-//! can access any hardware component at any time, with no special ceremony.
-//!
-//! * **Note:** If you want a 'managed' hardware style, more like many other
-//!   "embedded-wg" experiences, where hardware access is declared though the
-//!   type system by passing around zero-sized token types, try the
-//!   [agb](https://docs.rs/agb) crate instead.
-//!
-//! # This Is Intended For The Game Boy Advance
-//!
-//! When the `on_gba` crate feature is used, the crate assumes that you're
-//! building the crate for, and also running the code on, the Game Boy Advance.
-//! The build target is expected to be `thumbv4t-none-eabi` or
-//! `armv4t-none-eabi`, and any other targets might have a build error. Further,
-//! the specific device you run the code on is assumed to be the GBA (or a GBA
-//! emulator). These facts are used by the `unsafe` code in this crate.
-//!
-//! This crate feature is **on by default** because the primary purpose of this
-//! crate is to assist in the building of GBA games, but you *can* disable the
-//! feature and build the crate anyway. How much of this crate actually works on
-//! non-GBA platforms is **not** covered by our SemVer! Building and using the
-//! crate without the `on_gba` feature is intended for non-GBA code that wants
-//! the data type definitions the crate provides, such as a build script running
-//! on your development machine. Without the `on_gba` feature enabled, any GBA
-//! specific functions that "don't make sense" outside of a GBA context (such as
-//! functions using inline assembly) will just be `unimplemented!()`, and
-//! calling them will trigger a panic.
-//!
-//! If you're not familiar with GBA programming some explanations are provided
-//! on separate pages:
-//! * [Per System Setup][`per_system_setup`]
-//! * [Per Project Setup][`per_project_setup`]
+use core::{
+  fmt::Debug,
+  num::{NonZeroI16, NonZeroI32, NonZeroI8, NonZeroU16, NonZeroU32, NonZeroU8},
+  ptr::NonNull,
+};
 
-use bitfrob::{u16_get_bit, u16_with_bit};
-use voladdress::VolAddress;
+/// Marker trait bound for the methods of [`GbaCell`].
+///
+/// When a type implements this trait it indicates that the type can be
+/// atomically loaded/stored using a single volatile access.
+///
+/// ## Safety
+/// The type must fit in a single register, and have an alignment equal to its
+/// size. Generally that means it should be one of:
+///
+/// * an 8, 16, or 32 bit integer
+/// * a function pointer
+/// * a data pointer to a sized type
+/// * an optional non-null pointer (to function or sized data)
+/// * a `repr(transparent)` newtype over one of the above
+pub unsafe trait GbaCellSafe: Copy {}
+// Note(Lokathor): The list here is not exhaustive, it's just all the stuff I
+// thought of at the time. Add more as necessary.
+unsafe impl GbaCellSafe for u8 {}
+unsafe impl GbaCellSafe for u16 {}
+unsafe impl GbaCellSafe for u32 {}
+unsafe impl GbaCellSafe for i8 {}
+unsafe impl GbaCellSafe for i16 {}
+unsafe impl GbaCellSafe for i32 {}
+unsafe impl GbaCellSafe for f32 {}
+unsafe impl GbaCellSafe for NonZeroI16 {}
+unsafe impl GbaCellSafe for NonZeroI32 {}
+unsafe impl GbaCellSafe for NonZeroI8 {}
+unsafe impl GbaCellSafe for NonZeroU16 {}
+unsafe impl GbaCellSafe for NonZeroU32 {}
+unsafe impl GbaCellSafe for NonZeroU8 {}
+unsafe impl GbaCellSafe for Option<NonZeroI16> {}
+unsafe impl GbaCellSafe for Option<NonZeroI32> {}
+unsafe impl GbaCellSafe for Option<NonZeroI8> {}
+unsafe impl GbaCellSafe for Option<NonZeroU16> {}
+unsafe impl GbaCellSafe for Option<NonZeroU32> {}
+unsafe impl GbaCellSafe for Option<NonZeroU8> {}
+unsafe impl GbaCellSafe for char {}
+unsafe impl GbaCellSafe for bool {}
+unsafe impl<T> GbaCellSafe for *const T {}
+unsafe impl<T> GbaCellSafe for *mut T {}
+unsafe impl<T> GbaCellSafe for NonNull<T> {}
+unsafe impl<T> GbaCellSafe for Option<NonNull<T>> {}
+unsafe impl GbaCellSafe for Option<unsafe extern "C" fn(u16)> {}
+#[cfg(feature = "fixed")]
+unsafe impl<T> GbaCellSafe for fixed::FixedI32<T> {}
+#[cfg(feature = "fixed")]
+unsafe impl<T> GbaCellSafe for fixed::FixedI16<T> {}
+#[cfg(feature = "fixed")]
+unsafe impl<T> GbaCellSafe for fixed::FixedI8<T> {}
+#[cfg(feature = "fixed")]
+unsafe impl<T> GbaCellSafe for fixed::FixedU32<T> {}
+#[cfg(feature = "fixed")]
+unsafe impl<T> GbaCellSafe for fixed::FixedU16<T> {}
+#[cfg(feature = "fixed")]
+unsafe impl<T> GbaCellSafe for fixed::FixedU8<T> {}
 
-macro_rules! on_gba_or_unimplemented {
-  ($($token_tree:tt)*) => {
-    #[cfg(feature="on_gba")]
-    {
-      $($token_tree)*
-    }
-    #[cfg(not(feature="on_gba"))]
-    unimplemented!()
+/// A "cell" type suitable to hold a global on the GBA.
+#[repr(transparent)]
+pub struct GbaCell<T>(core::cell::UnsafeCell<T>);
+#[cfg(feature = "on_gba")]
+impl<T> Debug for GbaCell<T>
+where
+  T: GbaCellSafe + Debug,
+{
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    <T as Debug>::fmt(&self.read(), f)
+  }
+}
+impl<T> Default for GbaCell<T>
+where
+  T: GbaCellSafe + Default,
+{
+  #[inline]
+  #[must_use]
+  fn default() -> Self {
+    Self::new(T::default())
+  }
+}
+#[cfg(feature = "on_gba")]
+impl<T> Clone for GbaCell<T>
+where
+  T: GbaCellSafe + Default,
+{
+  #[inline]
+  #[must_use]
+  fn clone(&self) -> Self {
+    Self::new(self.read())
   }
 }
 
-pub mod asm;
-pub mod bios;
-pub mod dma;
-pub mod gba_cell;
-pub mod gba_fixed;
-pub mod irq;
-pub mod keys;
-pub mod mem;
-pub mod mgba;
-pub mod panic_handlers;
-pub mod per_project_setup;
-pub mod per_system_setup;
-pub mod random;
-pub mod sample_art;
-pub mod timers;
-pub mod video;
-
-/// "safe on GBA", which is either Safe or Unsafe according to the `on_gba`
-/// cargo feature.
 #[cfg(feature = "on_gba")]
-type SOGBA = voladdress::Safe;
-#[cfg(not(feature = "on_gba"))]
-type SOGBA = voladdress::Unsafe;
+unsafe impl<T> Sync for GbaCell<T> {}
 
-/// Responds "normally" to read/write, just holds a setting
-type PlainAddr<T> = VolAddress<T, SOGBA, SOGBA>;
-/// Read-only addr
-type RoAddr<T> = VolAddress<T, SOGBA, ()>;
-/// Write-only addr
-type WoAddr<T> = VolAddress<T, (), SOGBA>;
+impl<T> GbaCell<T>
+where
+  T: GbaCellSafe,
+{
+  /// Constructs a new cell with the value given
+  #[inline]
+  #[must_use]
+  pub const fn new(t: T) -> Self {
+    Self(core::cell::UnsafeCell::new(t))
+  }
 
-#[cfg(feature = "critical-section")]
-#[cfg_attr(feature = "doc_cfg", doc(cfg(feature = "critical-section")))]
-pub mod critical_section;
+  /// Read the value in the cell.
+  ///
+  /// ## Panics
+  /// The size and alignment of the type must be equal, and they must be 1, 2,
+  /// or 4. Anything else will panic.
+  #[inline]
+  #[must_use]
+  #[cfg(feature = "on_gba")]
+  #[cfg_attr(feature = "track_caller", track_caller)]
+  pub fn read(&self) -> T {
+    match (core::mem::size_of::<T>(), core::mem::align_of::<T>()) {
+      (4, 4) | (2, 2) | (1, 1) => unsafe { self.0.get().read_volatile() },
+      _ => unimplemented!(),
+    }
+  }
 
-/// `i16` with 8 bits of fixed-point fraction.
-///
-/// This is used by the affine matrix entries.
-///
-/// * This build of the crate uses the [`fixed`] crate
-#[cfg(feature = "fixed")]
-#[allow(non_camel_case_types)]
-pub type i16fx8 = fixed::FixedI16<fixed::types::extra::U8>;
-
-/// `i16` with 14 bits of fixed-point fraction.
-///
-/// This is used by the [`ArcTan`](crate::bios::ArcTan) and
-/// [`ArcTan2`](crate::bios::ArcTan2) BIOS functions.
-///
-/// * This build of the crate uses the [`fixed`] crate
-#[cfg(feature = "fixed")]
-#[allow(non_camel_case_types)]
-pub type i16fx14 = fixed::FixedI16<fixed::types::extra::U14>;
-
-/// `i32` with 8 bits of fixed-point fraction.
-///
-/// This is used by the background reference point entries.
-///
-/// * This build of the crate uses the [`fixed`] crate
-#[cfg(feature = "fixed")]
-#[allow(non_camel_case_types)]
-pub type i32fx8 = fixed::FixedI32<fixed::types::extra::U8>;
-
-/// `i16` with 8 bits of fixed-point fraction.
-///
-/// This is used by the affine matrix entries.
-///
-/// * This build of the crate uses the [`gba_fixed`] module
-#[cfg(not(feature = "fixed"))]
-#[allow(non_camel_case_types)]
-pub type i16fx8 = crate::gba_fixed::Fixed<i16, 8>;
-
-/// `i16` with 14 bits of fixed-point fraction.
-///
-/// This is used by the [`ArcTan`](crate::bios::ArcTan) and
-/// [`ArcTan2`](crate::bios::ArcTan2) BIOS functions.
-///
-/// * This build of the crate uses the [`gba_fixed`] module
-#[cfg(not(feature = "fixed"))]
-#[allow(non_camel_case_types)]
-pub type i16fx14 = crate::gba_fixed::Fixed<i16, 14>;
-
-/// `i32` with 8 bits of fixed-point fraction.
-///
-/// This is used by the background reference point entries.
-///
-/// * This build of the crate uses the [`gba_fixed`] module
-#[cfg(not(feature = "fixed"))]
-#[allow(non_camel_case_types)]
-pub type i32fx8 = crate::gba_fixed::Fixed<i32, 8>;
+  /// Writes a new value to the cell.
+  ///
+  /// ## Panics
+  /// The size and alignment of the type must be equal, and they must be 1, 2,
+  /// or 4. Anything else will panic.
+  #[inline]
+  #[cfg(feature = "on_gba")]
+  #[cfg_attr(feature = "track_caller", track_caller)]
+  pub fn write(&self, t: T) {
+    match (core::mem::size_of::<T>(), core::mem::align_of::<T>()) {
+      (4, 4) | (2, 2) | (1, 1) => unsafe { self.0.get().write_volatile(t) },
+      _ => unimplemented!(),
+    }
+  }
+}
