@@ -20,9 +20,6 @@ doc_cfg = []
 # debugging, and so it's off by default.
 track_caller = []
 
-[dependencies]
-fixed = { version = "1.27.0", default-features = false, optional = true }
-
 [package.metadata.docs.rs]
 # When building the crate docs, we want to see the crate "as if" it was running
 # on the GBA. This is the closest target that docs.rs supports by default and
