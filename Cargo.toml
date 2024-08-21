@@ -1,7 +1,7 @@
 [package]
 name = "gba"
 description = "A minimal cell wrapper for communication between regular and IRQ code on the GBA using single-word values."
-repository = "https://github.com/ischeinkman/gba-cell"
+repository = "https://github.com/rust-console/gba-cell"
 version = "0.0.1"
 edition = "2021"
 license = "Zlib OR Apache-2.0 OR MIT"
