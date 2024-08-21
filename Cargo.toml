@@ -1,5 +1,5 @@
 [package]
-name = "gba"
+name = "gba-cell"
 description = "A minimal cell wrapper for communication between regular and IRQ code on the GBA using single-word values."
 repository = "https://github.com/rust-console/gba-cell"
 version = "0.0.1"
