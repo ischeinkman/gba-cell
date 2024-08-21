@@ -7,6 +7,12 @@ edition = "2021"
 license = "Zlib OR Apache-2.0 OR MIT"
 
 [features]
+default = ["on_gba"]
+# SEE THE CRATE DOCS FOR SAFETY RELATED INFO REGARDING THIS FEATURE.
+on_gba = []
+# utilize `doc_cfg` where appropriate. requires nightly. intended mostly for use
+# during docs.rs documentation generation.
+doc_cfg = []
 # Activates the `track_caller` attribute on various functions. Use of the
 # `track_caller` attribute on a function adds a "secret" extra argument for the
 # `Location` of the caller, which can reduce performance if the function is not
@@ -19,3 +25,4 @@ track_caller = []
 # on the GBA. This is the closest target that docs.rs supports by default and
 # which *also* supports the `instruction_set` attribute to avoid build errors.
 targets = ["armv5te-unknown-linux-gnueabi"]
+features = ["doc_cfg"]
