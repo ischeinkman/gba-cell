@@ -1,4 +1,10 @@
 //! Provides the [`GbaCell`] type.
+//! 
+//! ## Safety
+//! 
+//! **This crate is intended to only be used for writing software on the
+//! Nintendo Gameboy Advanced. Use on any other platform may lead to Undefined
+//! Behaviour.**
 
 use core::fmt::Debug;
 
@@ -28,7 +34,6 @@ unsafe impl<T> GbaCellSafe for T where T: Copy {}
 #[repr(transparent)]
 pub struct GbaCell<T>(core::cell::UnsafeCell<T>);
 
-#[cfg(feature = "on_gba")]
 impl<T> Debug for GbaCell<T>
 where
     T: GbaCellSafe + Debug,
@@ -48,7 +53,6 @@ where
         Self::new(T::default())
     }
 }
-#[cfg(feature = "on_gba")]
 impl<T> Clone for GbaCell<T>
 where
     T: GbaCellSafe + Default,
@@ -60,7 +64,6 @@ where
     }
 }
 
-#[cfg(feature = "on_gba")]
 unsafe impl<T> Sync for GbaCell<T> {}
 
 impl<T> GbaCell<T>
@@ -90,7 +93,6 @@ where
     /// Read the value in the cell.
     #[inline]
     #[must_use]
-    #[cfg(feature = "on_gba")]
     #[cfg_attr(feature = "track_caller", track_caller)]
     pub fn read(&self) -> T {
         // SAFETY: Guranteed to meet the size & alignment requirements of the
@@ -100,7 +102,6 @@ where
 
     /// Writes a new value to the cell.
     #[inline]
-    #[cfg(feature = "on_gba")]
     #[cfg_attr(feature = "track_caller", track_caller)]
     pub fn write(&self, t: T) {
         // SAFETY: Guranteed to meet the size & alignment requirements of the
